@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Drawing</title>
+    <style>
+        /* Global styles */
+        body {
+            font-family: 'Poppins', sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            background: linear-gradient(120deg, #89f7fe, #66a6ff);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            width: 90%;
+            max-width: 900px;
+            animation: fadeIn 1s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h1 {
+            color: #333;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        p {
+            color: #555;
+            font-size: 1em;
+            margin-bottom: 20px;
+        }
+
+        /* Canvas styles */
+        canvas {
+            border: 2px solid #333;
+            border-radius: 12px;
+            background-color: #fafafa;
+            cursor: crosshair;
+            width: 100%;
+            height: 400px;
+            transition: box-shadow 0.3s ease-in-out;
+        }
+
+        canvas:hover {
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Controls Section */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            gap: 10px;
+        }
+
+        .controls button, .controls select {
+            padding: 10px 15px;
+            border: none;
+            background: linear-gradient(120deg, #89f7fe, #66a6ff);
+            color: #fff;
+            font-size: 1em;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .controls button:hover, .controls select:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .color-picker {
+            display: flex;
+            gap: 10px;
+        }
+
+        .color-picker div {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .color-picker div:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .color-picker .color-black { background-color: black; }
+        .color-picker .color-red { background-color: red; }
+        .color-picker .color-blue { background-color: blue; }
+        .color-picker .color-green { background-color: green; }
+
+        @media (max-width: 768px) {
+            canvas {
+                height: 300px;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Collaborative Drawing</h1>
+    <p>Draw together in real-time with your team!</p>
+    <canvas id="whiteboard"></canvas>
+
+    <div class="controls">
+        <div class="color-picker">
+            <div class="color-black" onclick="setColor('black')"></div>
+            <div class="color-red" onclick="setColor('red')"></div>
+            <div class="color-blue" onclick="setColor('blue')"></div>
+            <div class="color-green" onclick="setColor('green')"></div>
+        </div>
+
+        <select id="lineWidth" onchange="setLineWidth(event)">
+            <option value="2">2px</option>
+            <option value="5">5px</option>
+            <option value="10">10px</option>
+            <option value="15">15px</option>
+        </select>
+
+        <button onclick="toggleEraser()">Eraser</button>
+    </div>
+</div>
+
+<script>
+    // Canvas setup
+    const canvas = document.getElementById("whiteboard");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = window.innerWidth * 0.8;
+    canvas.height = 400;
+
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    let color = "black";
+    let lineWidth = 2;
+    let eraserMode = false;
+
+    canvas.addEventListener("mousedown", (e) => {
+        isDrawing = true;
+        [lastX, lastY] = [e.offsetX, e.offsetY];
+    });
+
+    canvas.addEventListener("mouseup", () => (isDrawing = false));
+    canvas.addEventListener("mouseout", () => (isDrawing = false));
+
+    canvas.addEventListener("mousemove", (e) => {
+        if (!isDrawing) return;
+        const drawingData = {
+            x1: lastX,
+            y1: lastY,
+            x2: e.offsetX,
+            y2: e.offsetY,
+            color: eraserMode ? "#fafafa" : color,
+            lineWidth: eraserMode ? 20 : lineWidth,
+        };
+
+        draw(drawingData); // Local draw
+        sendDrawingData(drawingData); // Send to server
+        [lastX, lastY] = [e.offsetX, e.offsetY];
+    });
+
+    // WebSocket setup
+    const socket = new WebSocket("ws://localhost:8000/ws/draw/");
+
+    socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        draw(data);
+    };
+
+    function sendDrawingData(data) {
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(data));
+        }
+    }
+
+    // Drawing function
+    function draw({ x1, y1, x2, y2, color, lineWidth }) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    // Utility functions
+    function setColor(newColor) {
+        color = newColor;
+        eraserMode = false;
+    }
+
+    function setLineWidth(event) {
+        lineWidth = event.target.value;
+        eraserMode = false;
+    }
+
+    function toggleEraser() {
+        eraserMode = !eraserMode;
+    }
+</script>
+</body>
+</html>
